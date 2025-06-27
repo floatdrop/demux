@@ -1,5 +1,7 @@
 package demux
 
+import "sync"
+
 // Dynamic creates dynamic demultiplexer that routes items from 'in' based on keys returned by 'keyFunc'.
 // For each unique key, a new goroutine is spawned running 'consumeFunc'.
 // Each consumeFunc receives a channel that delivers values matching its key.
@@ -9,11 +11,7 @@ func Dynamic[T any, K comparable](
 	consumeFunc func(K, <-chan T),
 ) {
 	outChans := make(map[K]chan T)
-	defer func() {
-		for _, ch := range outChans {
-			close(ch)
-		}
-	}()
+	var wg sync.WaitGroup
 
 	for t := range in {
 		key := keyFunc(t)
@@ -22,8 +20,18 @@ func Dynamic[T any, K comparable](
 			ch = make(chan T)
 			outChans[key] = ch
 
-			go consumeFunc(key, ch)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				consumeFunc(key, ch)
+			}()
 		}
 		ch <- t
 	}
+
+	for _, ch := range outChans {
+		close(ch)
+	}
+
+	wg.Wait()
 }
